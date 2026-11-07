@@ -29,6 +29,10 @@ header.top{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap
 .brand small{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--ink2);margin-top:4px}
 .lockbtn{border:0;cursor:pointer;background:rgba(255,255,255,.45);border-radius:999px;padding:13px 16px;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink)}
 .lockbtn.on{background:var(--ok);color:#fff}
+.sync{font-size:13px;font-weight:800;border-radius:999px;padding:8px 12px;background:rgba(255,255,255,.55);white-space:nowrap}
+.sync:empty{display:none}
+.sync.ok{color:#1a7f4b}.sync.err{color:var(--bad)}.sync.loc{color:var(--ink2)}
+.banner{background:#fff;border-radius:16px;padding:12px 16px;font-weight:700;font-size:14px;margin-bottom:14px;border:2px dashed var(--bad);color:var(--ink)}
 .pwerr{color:var(--bad);font-weight:800;min-height:22px;margin-top:8px}
 nav.tabs{margin-left:auto;display:flex;gap:6px;background:rgba(255,255,255,.45);padding:5px;border-radius:999px}
 nav.tabs button{border:0;background:transparent;padding:10px 18px;border-radius:999px;font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:.03em;cursor:pointer;color:var(--ink)}
@@ -300,6 +304,7 @@ table.lb tr.top1 td{background:rgba(0,177,143,.08)}
       <button data-tab="play" class="on">Битва</button>
       <button data-tab="rating">Рейтинг</button>
     </nav>
+    <span class="sync" id="sync"></span>
     <button class="lockbtn" id="lockBtn" type="button">🔒 Учитель</button>
   </header>
   <main id="app"></main>
@@ -359,6 +364,66 @@ let store = {players:[], settings:{r1sec:60, mem:7}, group:"young"};
 let canPersist = true;
 try{ const raw = localStorage.getItem(KEY); if(raw){ const s = JSON.parse(raw); if(s && Array.isArray(s.players)) store = Object.assign(store, s); store.settings = Object.assign({r1sec:60,mem:7}, s.settings||{}); } }catch(e){ canPersist = false; }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){ canPersist = false; } }
+/* ---------- Общий рейтинг (Google Таблица) ---------- */
+const API_URL = "https://script.google.com/macros/s/AKfycbz9ZrHl7eGaSC3aWYr9RgYwXnADSix571OZKHLCBBIGAZjYfFVV164SuOVsi-_zhmE6iQ/exec";       // адрес веб-приложения Apps Script
+const PROJECT = "itishkino";
+const ONLINE = /^https:\/\/script\.google(usercontent)?\.com\//.test(API_URL);
+let syncState = ONLINE ? "loading" : "local";
+let pending = []; try{ pending = JSON.parse(localStorage.getItem(KEY+"-pending")||"[]"); }catch(e){}
+function savePending(){ try{ localStorage.setItem(KEY+"-pending", JSON.stringify(pending)); }catch(e){} }
+function updateSyncBadge(){
+  const el=document.getElementById("sync"); if(!el) return;
+  const m={loading:["…","loc","Подключаюсь к общему рейтингу"], ok:["● Общий рейтинг","ok","Результаты сохраняются в общую таблицу"],
+           error:["● Нет связи","err","Нет связи с общей таблицей — результаты сохранены здесь и отправятся позже"],
+           local:["● Только этот компьютер","loc","Общая таблица не подключена"]}[syncState];
+  el.textContent=m[0]+(pending.length&&ONLINE?` (ждут отправки: ${pending.length})`:""); el.className="sync "+m[1]; el.title=m[2];
+}
+async function apiPost(body){
+  const r = await fetch(API_URL,{method:"POST", body:JSON.stringify(Object.assign({project:PROJECT},body))});
+  const j = await r.json(); if(!j.ok) throw new Error(j.error||"error"); return j;
+}
+let pulling=null;
+function pull(){
+  if(!ONLINE) return Promise.resolve();
+  if(pulling) return pulling;
+  pulling = (async()=>{
+    try{
+      const r = await fetch(API_URL+(API_URL.includes("?")?"&":"?")+"action=list&project="+PROJECT+"&t="+Date.now());
+      const j = await r.json(); if(!j.ok) throw new Error(j.error||"error");
+      const map = new Map(j.players.map(p=>[p.id,p]));
+      store.players.forEach(p=>{ if(pending.includes(p.id)) map.set(p.id,p); });   // своё, ещё не отправленное
+      if(game && game.player && game.phase!=="finish") map.set(game.player.id, game.player); // идущая битва — свежая версия
+      store.players = [...map.values()].sort((a,b)=>(a.ts||0)-(b.ts||0));
+      if(j.settings) store.settings = Object.assign({r1sec:60,mem:7}, store.settings, j.settings);
+      syncState="ok"; save();
+    }catch(e){ syncState="error"; }
+    pulling=null; updateSyncBadge();
+  })();
+  return pulling;
+}
+let pushChain = Promise.resolve();
+function pushPlayer(p){
+  if(!ONLINE) return Promise.resolve();
+  if(!pending.includes(p.id)){ pending.push(p.id); savePending(); }
+  updateSyncBadge();
+  const snap = JSON.parse(JSON.stringify(p));
+  pushChain = pushChain.then(async()=>{
+    try{ await apiPost({action:"upsert", player:snap}); pending=pending.filter(x=>x!==snap.id); savePending(); syncState="ok"; }
+    catch(e){ syncState="error"; }
+    updateSyncBadge();
+  });
+  return pushChain;
+}
+function flushPending(){
+  pending.slice().forEach(id=>{ const p=store.players.find(x=>x.id===id); if(p) pushPlayer(p); else { pending=pending.filter(x=>x!==id); savePending(); } });
+  return pushChain;
+}
+async function adminCall(body, okMsg){
+  if(!ONLINE) return true;
+  try{ await apiPost(Object.assign({pw:teacherPw}, body)); await pull(); if(okMsg) toast(okMsg); return true; }
+  catch(e){ toast(String(e.message).includes("password")?"Таблица не приняла пароль":"Нет связи с общей таблицей — попробуйте ещё раз"); return false; }
+}
+
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
 /* ---------- Утилиты ---------- */
@@ -386,8 +451,8 @@ function confirmBox(text, okLabel, onOk, danger){
 /* ---------- Режим учителя ---------- */
 const PW_HASH="en68fpfo71";
 function cyrb53(str,seed=7){let h1=0xdeadbeef^seed,h2=0x41c6ce57^seed;for(let i=0,ch;i<str.length;i++){ch=str.charCodeAt(i);h1=Math.imul(h1^ch,2654435761);h2=Math.imul(h2^ch,1597334677);}h1=Math.imul(h1^(h1>>>16),2246822507);h1^=Math.imul(h2^(h2>>>13),3266489909);h2=Math.imul(h2^(h2>>>16),2246822507);h2^=Math.imul(h1^(h1>>>13),3266489909);return (4294967296*(2097151&h2)+(h1>>>0)).toString(36);}
-let teacher=false; // только в памяти: после перезагрузки страницы режим закрывается
-function setTeacher(v){ teacher=v; const b=$("#lockBtn"); b.classList.toggle("on",v); b.textContent=v?"🔓 Закрыть режим учителя":"🔒 Учитель"; }
+let teacher=false, teacherPw=""; // только в памяти: после перезагрузки страницы режим закрывается
+function setTeacher(v){ teacher=v; if(!v) teacherPw=""; const b=$("#lockBtn"); b.classList.toggle("on",v); b.textContent=v?"🔓 Закрыть режим учителя":"🔒 Учитель"; }
 function requireTeacher(cb){
   if(teacher){ cb(); return; }
   const ov=document.createElement("div"); ov.className="overlay";
@@ -400,7 +465,7 @@ function requireTeacher(cb){
   const f=ov.querySelector("form"), pw=ov.querySelector("#pw"); pw.focus();
   ov.addEventListener("click",e=>{ if(e.target===ov||e.target.hasAttribute("data-x")) ov.remove(); });
   f.addEventListener("submit",e=>{ e.preventDefault(); e.stopPropagation();
-    if(cyrb53(pw.value)===PW_HASH){ ov.remove(); setTeacher(true); cb(); }
+    if(cyrb53(pw.value)===PW_HASH){ teacherPw=pw.value; ov.remove(); setTeacher(true); cb(); }
     else { $("#pwErr").textContent="Неверный пароль"; pw.value=""; pw.classList.add("shake"); setTimeout(()=>pw.classList.remove("shake"),300); pw.focus(); }
   });
 }
@@ -473,8 +538,8 @@ function renderHome(){
   const nm=$("#nm"); nm.focus();
   $("#grp").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; store.group=b.dataset.g; save(); document.querySelectorAll("#grp button").forEach(x=>x.classList.toggle("on",x===b)); });
   if(teacher){
-  $("#setSec").addEventListener("change",e=>{ store.settings.r1sec=Math.max(20,Math.min(180,+e.target.value||60)); e.target.value=store.settings.r1sec; save(); });
-  $("#setMem").addEventListener("change",e=>{ store.settings.mem=Math.max(3,Math.min(15,+e.target.value||7)); e.target.value=store.settings.mem; save(); });
+  $("#setSec").addEventListener("change",e=>{ store.settings.r1sec=Math.max(20,Math.min(180,+e.target.value||60)); e.target.value=store.settings.r1sec; save(); adminCall({action:"settings",settings:store.settings},"Настройки сохранены для всех компьютеров"); });
+  $("#setMem").addEventListener("change",e=>{ store.settings.mem=Math.max(3,Math.min(15,+e.target.value||7)); e.target.value=store.settings.mem; save(); adminCall({action:"settings",settings:store.settings},"Настройки сохранены для всех компьютеров"); });
   }
   $("#startForm").addEventListener("submit",e=>{
     e.preventDefault();
@@ -482,7 +547,7 @@ function renderHome(){
     if(!name){ nm.classList.add("shake"); nm.focus(); setTimeout(()=>nm.classList.remove("shake"),300); return; }
     if(teacher){ setTeacher(false); toast("Режим учителя закрыт — битва началась"); }
     const p={id:uid(), name, group:store.group, ts:Date.now(), source:"app"};
-    store.players.push(p); save();
+    store.players.push(p); save(); pushPlayer(p);
     game={player:p, step:0, phase:"intro", running:false, last:null};
     render();
   });
@@ -593,7 +658,7 @@ function playList(r){
     let el=(performance.now()-t0)/1000; if(limit) el=Math.min(el,limit/1000);
     const correct=res.filter(x=>x.ok).length, wrong=res.length-correct;
     game.player[r.key]={correct, wrong, time:+el.toFixed(2), total:words.length, done:res.length};
-    game.last={kind:"list", res, words, timed:!!limit}; save();
+    game.last={kind:"list", res, words, timed:!!limit}; save(); pushPlayer(game.player);
     game.phase="result"; render();
   }
 }
@@ -656,7 +721,7 @@ function finishExact(r, target, typed, time){
   clearTimers(); game.running=false;
   const ok = normStrict(typed)===normStrict(target);
   game.player[r.key]={ok, time:+time.toFixed(2), typed:typed.trim()};
-  game.last={kind:"exact", target, typed:typed.trim(), ok}; save();
+  game.last={kind:"exact", target, typed:typed.trim(), ok}; save(); pushPlayer(game.player);
   game.phase="result"; render();
 }
 
@@ -731,6 +796,7 @@ function renderFinish(){
       </div>
     </div></div>`;
   $("#again").addEventListener("click",()=>{ game=null; render(); });
+  if(ONLINE && !game._synced){ game._synced=true; pushChain.then(()=>pull()).then(()=>{ if(tab==="play" && game && game.phase==="finish") renderFinish(); }); }
   $("#toRating").addEventListener("click",()=>{ game=null; store.group=g; save(); setTab("rating"); });
 }
 
@@ -786,6 +852,7 @@ function renderRating(){
     <button class="btn light small" id="fsBtn">⛶</button>
     ${teacher?`<button class="btn danger small" id="clrBtn">Новая битва</button>`:""}
   </div>
+  ${!ONLINE?`<div class="banner">⚠️ Общая таблица не подключена: здесь видны только результаты с этого компьютера.</div>`:syncState==="error"?`<div class="banner">⚠️ Нет связи с общей таблицей. Показаны последние полученные данные, рейтинг обновится сам, когда связь появится.</div>`:""}
   <div class="gtabs" id="gt">${GROUPS.map(k=>`<button data-g="${k}" class="${k===g?"on":""}">${DATA[k].label}<em>${counts[k]}</em></button>`).join("")}</div>
   ${rows.length?`<div class="podium">${podCard(pod[0],"p2",pod[0]?pod[0].place:2)}${podCard(pod[1],"p1",1)}${podCard(pod[2],"p3",pod[2]?pod[2].place:3)}</div>`:""}
   <div class="tablewrap">
@@ -821,8 +888,8 @@ function renderRating(){
   if(teacher){
   $("#addBtn").addEventListener("click",()=>editPlayer(null));
   $("#csvBtn").addEventListener("click",copyCsv);
-  $("#clrBtn").addEventListener("click",()=>confirmBox("Очистить всю таблицу рейтинга (все группы)?","Очистить",()=>{ store.players=[]; save(); renderRating(); toast("Таблица очищена"); },true));
-  app.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{ const p=store.players.find(x=>x.id===b.dataset.del); confirmBox(`Удалить «${p.name}» из рейтинга?`,"Удалить",()=>{ store.players=store.players.filter(x=>x.id!==p.id); save(); renderRating(); },true); }));
+  $("#clrBtn").addEventListener("click",()=>confirmBox(ONLINE?"Начать новую битву? Таблица рейтинга очистится на всех компьютерах (в Google Таблице прошлые результаты сохранятся на листе «Архив»).":"Очистить всю таблицу рейтинга (все группы)?","Очистить",async()=>{ if(ONLINE){ await adminCall({action:"clear"},"Таблица очищена"); renderRating(); return; } store.players=[]; save(); renderRating(); toast("Таблица очищена"); },true));
+  app.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{ const p=store.players.find(x=>x.id===b.dataset.del); confirmBox(`Удалить «${p.name}» из рейтинга?`,"Удалить",async()=>{ pending=pending.filter(x=>x!==p.id); savePending(); if(ONLINE && !(await adminCall({action:"delete",id:p.id},"Удалено"))) return; store.players=store.players.filter(x=>x.id!==p.id); save(); renderRating(); },true); }));
   app.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>editPlayer(store.players.find(x=>x.id===b.dataset.edit))));
   } else {
     app.querySelector(".lbhead h2").insertAdjacentHTML("afterend",`<button class="btn light small" id="unlockHint">🔒 Управление таблицей</button>`);
@@ -869,6 +936,7 @@ function editPlayer(p){
     });
     if(isNew) store.players.push(t);
     store.group=t.group; save(); ov.remove(); renderRating();
+    if(ONLINE) adminCall({action:"upsert",player:t},"Сохранено в общую таблицу").then(()=>{ if(tab==="rating") renderRating(); });
   });
 }
 
@@ -887,6 +955,16 @@ function copyCsv(){
 }
 
 /* ---------- Старт ---------- */
+updateSyncBadge();
+if(ONLINE){
+  const calm=()=>!document.querySelector(".overlay") && !(game&&game.running) && (tab==="rating" || (!game && !(($("#nm")||{}).value)));
+  flushPending(); pull().then(()=>{ if(calm()) render(); });
+  setInterval(()=>{
+    if(document.visibilityState!=="visible") return;
+    if(pending.length) flushPending();
+    pull().then(()=>{ if(tab==="rating" && !document.querySelector(".overlay")) renderRating(); });
+  }, 7000);
+}
 if(location.hash==="#rating") tab="rating";
 document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
 render();
