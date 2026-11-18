@@ -293,6 +293,8 @@ table.lb tr.top1 td{background:rgba(0,177,143,.08)}
 .errs li{background:#F3FAF8}
 .toast{background:var(--t)}
 
+table.lb tr.prize .place{background:var(--tl);color:var(--t2)}
+
 </style>
 </head>
 <body>
@@ -329,20 +331,20 @@ const ART = `<svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" role=
 /* ---------- Задания (из методички и презентаций) ---------- */
 const DATA = {
   young:{label:"Младшие",
-    warm:["мышь","шнур","кнопка","монитор","пробел"],
-    r1:["робот","код","игра","сайт","файл","мышка","экран","клавиша","папка","программа","алгоритм","компьютер","интернет","сервер","данные","проект","функция","браузер","пароль","сеть","система","разработка"],
-    r2:"КОД код КОД код 123 132 133",
-    r3:"КОД 7 КНОПКА"},
+    warm:["кот","дом","мяч","сок","лес"],
+    r1:["кот","дом","мяч","сок","лес","нос","сыр","сон","дуб","мир","код","игра","мама","папа","лиса","рыба","небо","луна","окно","вода","робот","мышка","книга","школа","экран"],
+    r2:"КОТ кот 123",
+    r3:"КОТ 5"},
   mid:{label:"Средние",
-    warm:["клавиатура","программа","дисплей","матрица","ноутбук"],
-    r1:["компьютер","клавиатура","монитор","программист","робот","алгоритм","интернет","пароль","мышка","программа","браузер","пиксель","сервер","нейросеть","аватар","геймдизайнер","Minecraft","Scratch","мультфильм","видеоигра","программирование","робототехника","кибербезопасность","искусственный интеллект","компьютерная графика","видеомонтаж","разработчик","анимация","персонаж","конструктор","электроника","кодирование","симулятор","геймплей","технологии"],
-    r2:"KBR-29_xT7! Programmer PROGRAMMER Programmer",
-    r3:"Python_3 Java_21"},
+    warm:["игра","школа","робот","экран","мышка"],
+    r1:["робот","экран","мышка","игра","сайт","файл","папка","кнопка","клавиша","монитор","пароль","видео","музыка","планшет","телефон","проект","уровень","герой","бонус","пиксель","команда","наушники","принтер","интернет","компьютер"],
+    r2:"Робот РОБОТ робот 25",
+    r3:"Код_7 Игра"},
   old:{label:"Старшие",
-    warm:["алгоритмизация","кибербезопасность","конфигурирование","робототехника","аутентификация"],
-    r1:["искусственный интеллект","машинное обучение","чат-бот","промпт","генерация","пиксель","графика","анимация","текстура","рендер","моделирование","3D-графика","виртуальная реальность","геймдизайн","геймплей","игровой движок","киберспорт","стриминг","видеомонтаж","код-ревью","цифровые технологии","техническое задание","пользовательский опыт","виртуальный мир","программный продукт","мобильная разработка","веб-разработка","системный администратор","информационные технологии"],
-    r2:'AaBbCcDd EeFfGg 01001101 01001001 const userName = "Alex_27";',
-    r3:"Dev_27! Code#91"}
+    warm:["программа","алгоритм","браузер","клавиатура","компьютер"],
+    r1:["код","сайт","сервер","браузер","пароль","пиксель","анимация","графика","дизайн","алгоритм","программа","нейросеть","чат-бот","игровой мир","3D-модель","видеомонтаж","робототехника","программист","разработчик","приложение","персонаж","интернет","технологии","клавиатура","проект"],
+    r2:"Python 3 PYTHON python_3!",
+    r3:"Code_25! Bot"}
 };
 const GROUPS = ["young","mid","old"];
 const ROUNDS = [
@@ -355,8 +357,8 @@ const ROUNDS = [
   {key:"r3", kind:"memory", badge:"Раунд 3", title:"Запомни и напечатай", sub:"Посмотри на строку, запомни её, дождись сигнала и воспроизведи",
    how:"Строка появится на <b>{mem} секунд</b> и исчезнет. Потом напечатай её по памяти и нажми <kbd>Enter</kbd>.", scored:true}
 ];
-const KIB = [20,15,10];   // 1, 2, 3 место
-const KIB_ALL = 5;        // все участники
+const KIB = [20,15,10,5,5];   // 1–5 место
+const KIB_ALL = 0;            // остальные места без приза
 
 /* ---------- Хранилище ---------- */
 const KEY = "itishkino-battle-v1";
@@ -525,7 +527,7 @@ function renderHome(){
   </div>
   <div class="awards">
     <span>✓ без ошибок — +1 балл</span><span>⚡ лучший в раунде — +1 балл</span>
-    <span>🥇 20 айтишек</span><span>🥈 15 айтишек</span><span>🥉 10 айтишек</span><span>всем участникам — 5 айтишек</span>
+    <span>🥇 20 айтишек</span><span>🥈 15 айтишек</span><span>🥉 10 айтишек</span><span>4 и 5 место — по 5 айтишек</span>
   </div>
   ${teacher?`<details class="settings" open>
     <summary>Настройки ведущего</summary>
@@ -827,7 +829,7 @@ function computeGroup(g){
   rows.forEach((r,i)=>{
     const prev=rows[i-1];
     r.place = (prev && prev.total===r.total && prev.tb1===r.tb1 && Math.abs(prev.tb2-r.tb2)<EPS) ? prev.place : i+1;
-    r.kib = r.place<=3 ? KIB[r.place-1] : KIB_ALL;
+    r.kib = r.place<=KIB.length ? KIB[r.place-1] : KIB_ALL;
   });
   return rows;
 }
@@ -864,14 +866,14 @@ function renderRating(){
       <th class="rnd">Р3 · Память<br>время</th>
       <th class="rnd">Баллы</th><th>Айтишки</th><th></th>
     </tr></thead>
-    <tbody>${rows.map(r=>{ const p=r.p,s=r.s; return `<tr class="${r.place<=3?"top"+r.place:""}">
+    <tbody>${rows.map(r=>{ const p=r.p,s=r.s; return `<tr class="${r.place<=3?"top"+r.place:r.place<=5?"prize":""}">
       <td><span class="place">${r.place}</span></td>
       <td class="l nmcell">${esc(p.name)}</td>
       <td class="rnd"><span class="raw">${p.r1?`${p.r1.correct} / ${p.r1.wrong}`:"—"}</span><span class="marks">${mk(s.r1ok,"okm","✓","Без ошибок")}${mk(s.r1sp,"spm","⚡","Лучший в раунде")}</span></td>
       <td class="rnd"><span class="raw">${p.r2?(p.r2.ok?"":"✗ ")+fmt(p.r2.time):"—"}</span><span class="marks">${mk(s.r2ok,"okm","✓","Без ошибок")}${mk(s.r2sp,"spm","⚡","Самый быстрый")}</span></td>
       <td class="rnd"><span class="raw">${p.r3?(p.r3.ok?"":"✗ ")+fmt(p.r3.time):"—"}</span><span class="marks">${mk(s.r3ok,"okm","✓","Без ошибок")}${mk(s.r3sp,"spm","⚡","Самый быстрый")}</span></td>
       <td class="rnd"><span class="total">${r.total}</span></td>
-      <td><span class="kib">${r.kib} 🪙</span></td>
+      <td>${r.kib?`<span class="kib">${r.kib} 🪙</span>`:`<span class="muted">—</span>`}</td>
       <td style="white-space:nowrap">${teacher?`<button class="rowbtn" data-edit="${p.id}" title="Изменить">✎</button><button class="rowbtn" data-del="${p.id}" title="Удалить">🗑</button>`:""}</td>
     </tr>`;}).join("")}</tbody></table>`
   : `<div class="empty-state">В группе «${esc(DATA[g].label)}» пока нет результатов.<br>Пройдите битву на вкладке «Битва» или добавьте результаты вручную.</div>`}
@@ -881,7 +883,7 @@ function renderRating(){
     <span>${mk(true,"spm","⚡","")} первое место в раунде по скорости — +1 балл</span>
     <span class="muted">Р1: лучший — больше всего правильных слов. Р2 и Р3: лучший — самый быстрый среди тех, кто без ошибок. При равных баллах выше тот, у кого больше слов в спринте.</span>
   </div>
-  <div class="awards"><span>🥇 1 место — 20 айтишек</span><span>🥈 2 место — 15</span><span>🥉 3 место — 10</span><span>Все участники — 5</span></div>`;
+  <div class="awards"><span>🥇 1 место — 20 айтишек</span><span>🥈 2 место — 15</span><span>🥉 3 место — 10</span><span>4 и 5 место — по 5</span></div>`;
   $("#gt").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; store.group=b.dataset.g; save(); renderRating(); });
   $("#projBtn").addEventListener("click",()=>{ projMode=!projMode; renderRating(); });
   $("#fsBtn").addEventListener("click",()=>{ try{ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(()=>toast("Полноэкранный режим недоступен")); }catch(e){ toast("Полноэкранный режим недоступен"); } });
